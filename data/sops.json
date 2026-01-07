@@ -1,0 +1,56 @@
+[
+  {
+    "id":"neft",
+    "title":"NEFT / RTGS Process",
+    "keywords":["neft","rtgs","fund transfer","money transfer"],
+    "steps":[
+      "Customer account debit balance verify kare",
+      "Beneficiary details confirm kare",
+      "Finacle me Fund Transfer menu open kare",
+      "Amount aur narration enter kare",
+      "Transaction submit kare aur acknowledgement de"
+    ],
+    "commands":["HFT","FTM","NEFT"],
+    "related_tags":["neft"]
+  },
+  {
+    "id":"account_open",
+    "title":"SB / CA Account Opening",
+    "keywords":["account open","khata kholna","sb account","ca account"],
+    "steps":[
+      "Customer KYC documents verify kare",
+      "CIF create kare (Retail)",
+      "Account opening menu use kare",
+      "Initial deposit receive kare",
+      "Passbook / kit issue kare"
+    ],
+    "commands":["CIF","HACM","HACCOP"],
+    "related_tags":["account"]
+  },
+  {
+    "id":"account_close",
+    "title":"Account Closure SOP",
+    "keywords":["account close","khata band","closure"],
+    "steps":[
+      "Account balance zero kare",
+      "Charges / interest adjust kare",
+      "Closure menu execute kare",
+      "Customer acknowledgement le"
+    ],
+    "commands":["HCAAC","ACCTCLS"],
+    "related_tags":["closure"]
+  },
+  {
+    "id":"cif",
+    "title":"CIF Creation SOP",
+    "keywords":["cif","customer information file"],
+    "steps":[
+      "Customer details collect kare",
+      "KYC upload kare",
+      "Retail / Corporate CIF create kare",
+      "Account linking verify kare"
+    ],
+    "commands":["CIF","HCCA","HACM"],
+    "related_tags":["cif"]
+  }
+]
