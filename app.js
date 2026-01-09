@@ -255,7 +255,7 @@ function scoreChunk(tokens, text, metaPdf = "") {
 /* =========================
    Get top matching unique PDF pages (filtered + boosted)
 ========================= */
-function uniqueTopSources(query, limit = 10) {
+function uniqueTopSources(query, limit = 10, intent = "unknown") {
   const tokens = tokenize(query);
   const hints = topicHints(tokens);
 
@@ -264,10 +264,26 @@ function uniqueTopSources(query, limit = 10) {
     if (!isPdfRelevant(c.pdf, hints)) continue;
 
     let sc = scoreChunk(tokens, c.text, c.pdf);
-    if (sc <= 0) continue;
 
     const pdf = (c.pdf || "").toLowerCase();
     const txt = (c.text || "").toLowerCase();
+
+    // Intent separation (process vs inquiry vs modify/report)
+    if (intent === "process") {
+      const hasInquiryCue = /\b(inquire|inquiry|utr|status|inward|outward)\b/.test(txt);
+      const hasProcessCue = /\b(add|function\s*=?\s*a|debit|credit|beneficiary|amount|charges|payment|remit|transfer|submit|authorize|authorise|verify)\b/.test(txt);
+      if (hasInquiryCue && !hasProcessCue) sc -= 4.0;
+    } else if (intent === "inquiry") {
+      const hasInquiryCue = /\b(inquire|inquiry|utr|status|inward|outward)\b/.test(txt);
+      const hasProcessCue = /\b(add|function\s*=?\s*a|debit|credit|beneficiary|amount|charges|payment|remit|transfer)\b/.test(txt);
+      if (hasProcessCue && !hasInquiryCue) sc -= 4.0;
+    } else if (intent === "modify") {
+      const hasModifyCue = /\b(modify|change|update|delete|remove|reversal|rectify|amend)\b/.test(txt);
+      if (!hasModifyCue) sc -= 1.5;
+    } else if (intent === "report") {
+      const hasReportCue = /\b(print|report|statement|advice|download|view|list)\b/.test(txt);
+      if (!hasReportCue) sc -= 1.5;
+    }
 
     // Topic boosts
     if (hints.neft || hints.rtgs) {
@@ -292,6 +308,8 @@ function uniqueTopSources(query, limit = 10) {
     if (hints.open) {
       if (pdf.includes("open") || pdf.includes("opening") || pdf.includes("account")) sc += 1.0;
     }
+
+    if (sc <= 0) continue;
 
     scored.push({ sc, c });
   }
@@ -447,7 +465,7 @@ function normalizeLine(s) {
 /* =========================
    Build clean SOP steps from matched pages
 ========================= */
-function buildStepsFromSources(query, sources, maxSteps = 8) {
+function buildStepsFromSources(query, sources, maxSteps = 8, intent = "unknown") {
   const tokens = tokenize(query);
   const hints = topicHints(tokens);
   const qlow = (query || "").toLowerCase();
@@ -501,6 +519,14 @@ function buildStepsFromSources(query, sources, maxSteps = 8) {
 
       // avoid clearly unrelated step-lines for NEFT/RTGS
       if ((hints.neft || hints.rtgs) && /(pan|acctpani|rupay|debit card|atm|adcreq)/i.test(p)) continue;
+      // Intent separation for steps (prevents inquiry steps mixing into process and vice-versa)
+      const low2 = p.toLowerCase();
+      const stepHasInquiryCue = /\b(inquire|inquiry|utr|status|inward|outward)\b/.test(low2);
+      const stepHasProcessCue = /\b(add|function\s*=?\s*a|debit|credit|beneficiary|amount|charges|payment|remit|transfer)\b/.test(low2);
+
+      if (intent === "process" && stepHasInquiryCue && !stepHasProcessCue) continue;
+      if (intent === "inquiry" && stepHasProcessCue && !stepHasInquiryCue) continue;
+
 
       const sc = scoreChunk(tokens, p, s.pdf) + extra;
       if (sc <= 0) continue;
@@ -604,6 +630,213 @@ function renderEnquiryCard({ queryRaw, title, menu, steps, pdf, page, note }) {
 /* =========================
    Render Answer (Hard Rules first, else PDF-based)
 ========================= */
+
+/* =========================
+   Branch Mode: Intent detection + chooser + simple Hindi steps
+========================= */
+function detectIntent(query){
+  const q = (query||"").toLowerCase();
+
+  const procWords = ["karna","kare","do","send","transfer","fund transfer","remit","pay","payment","add","open","close","create","banaye","banana","apply","debit","credit"];
+  const inqWords  = ["status","inquiry","inquire","utr","track","check","verify status","inward","outward","pending","reject","success","dekhna","dekho"];
+  const modWords  = ["change","modify","update","delete","remove","rectify","correction","amend","reversal","undo"];
+  const repWords  = ["print","report","statement","advice","list","summary","download","view"];
+
+  const score = (arr)=> arr.reduce((s,w)=> s + (q.includes(w)?1:0), 0);
+
+  const sp = score(procWords);
+  const si = score(inqWords);
+  const sm = score(modWords);
+  const sr = score(repWords);
+
+  const max = Math.max(sp, si, sm, sr);
+  if(max === 0) return "unknown";
+
+  const winners = [sp===max?"process":null, si===max?"inquiry":null, sm===max?"modify":null, sr===max?"report":null].filter(Boolean);
+  if(winners.length !== 1) return "unknown";
+  return winners[0];
+}
+
+function simplifyHiLine(line){
+  let s = (line||"").toString().trim();
+  if(!s) return s;
+
+  s = s.replace(/\bINVOKE\s+MENU\b/ig, "Menu");
+  s = s.replace(/\binvoke\b/ig, "Menu");
+  s = s.replace(/\bmenu\s+([A-Z]{3,10})\b/i, "Menu $1 खोलें");
+
+  s = s.replace(/\bselect\s+function\s*code\b/ig, "Function code चुनें");
+  s = s.replace(/\bfunction\s*code\s*=?\s*([A-Z])\b/i, "Function $1 चुनें");
+  s = s.replace(/\bA\s*\(?ADD\)?\b/i, "A (ADD)");
+
+  s = s.replace(/\benter\b/ig, "दर्ज करें");
+  s = s.replace(/\bsubmit\b/ig, "Submit करें");
+  s = s.replace(/\bauthoris(e|ation)?\b/ig, "Authorize/Verify करें");
+  s = s.replace(/\bverify\b/ig, "Verify करें");
+  s = s.replace(/\bfetch\b/ig, "Fetch करें");
+  s = s.replace(/\bselect\b/ig, "Select करें");
+
+  s = s.replace(/\bdebit\s+a\/c\b/ig, "Debit A/c");
+  s = s.replace(/\bcredit\s+a\/c\b/ig, "Credit A/c");
+
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
+function simplifyHi(steps){
+  const out = [];
+  for(const st of (steps||[])){
+    const x = simplifyHiLine(st);
+    if(x) out.push(x);
+  }
+  return out;
+}
+
+function renderIntentChooser(query, suggested){
+  const ans = $("#answer");
+  if(!ans) return;
+
+  const current = suggested || "process";
+  const btn = (id, label)=> `<button class="btn intentBtn" data-intent="${id}" style="margin-right:8px">${label}${id===current?" ✓":""}</button>`;
+
+  const wrap = document.createElement("div");
+  wrap.className = "card";
+  wrap.innerHTML = `
+    <h2>आप क्या करना चाहते हैं?</h2>
+    <div class="small">Query: <b>${escapeHtml(query)}</b></div>
+    <div class="hr"></div>
+    <div>
+      ${btn("process","✅ करना / Process")}
+      ${btn("inquiry","🔎 Status / Inquiry")}
+      ${btn("modify","✍️ Change / Modify")}
+      ${btn("report","🧾 Report / Print")}
+    </div>
+    <div class="small" style="margin-top:10px">Tip: अगर results mix लगें तो ऊपर से सही option चुनें।</div>
+  `;
+  ans.innerHTML = "";
+  ans.appendChild(wrap);
+
+  $$(".intentBtn", wrap).forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const intent = b.dataset.intent || "process";
+      renderAnswerWithIntent(query, intent, true);
+    });
+  });
+}
+
+function renderAnswerWithIntent(query, intent, keepChooser=false){
+  const ans = $("#answer");
+  if(!ans) return;
+
+  const sources = uniqueTopSources(query, 10, intent);
+  const tokens = tokenize(query);
+  const menus = extractMenus(sources, tokens);
+
+  const stepsRaw = buildStepsFromSources(query, sources, 8, intent);
+  const stepsHi = simplifyHi(stepsRaw);
+
+  const container = document.createElement("div");
+
+  const head = document.createElement("div");
+  head.className="card";
+  head.innerHTML = `
+    <h2>Result <span class="small">• ${escapeHtml(intent)}</span></h2>
+    <div class="small">Query: <b>${escapeHtml(query)}</b></div>
+  `;
+  container.appendChild(head);
+
+  const menuCard = document.createElement("div");
+  menuCard.className="card";
+  menuCard.innerHTML = `<h2>Suggested Finacle Menu / Command</h2><div class="small">Intent-based top match from PDFs.</div>`;
+  if(menus.length){
+    const wrap = document.createElement("div");
+    wrap.className="menuWrap";
+    wrap.innerHTML = menus.slice(0,10).map((m,i)=>`<span class="menu">${i===0?"⭐ ":""}${escapeHtml(m)}</span>`).join("");
+    menuCard.appendChild(wrap);
+  }else{
+    const p = document.createElement("div");
+    p.className="small";
+    p.textContent="No strong menu code detected. Try different keywords or open PDF Library.";
+    menuCard.appendChild(p);
+  }
+  container.appendChild(menuCard);
+
+  const stepCard = document.createElement("div");
+  stepCard.className="card";
+  stepCard.innerHTML = `<h2>Step-by-step (सरल भाषा)</h2><div class="small">Auto-built from matching PDF pages.</div>`;
+  if(stepsHi.length){
+    const ol = document.createElement("ol");
+    ol.className="steps";
+    ol.innerHTML = stepsHi.map(x=>`<li>${escapeHtml(x)}</li>`).join("");
+    stepCard.appendChild(ol);
+
+    const det = document.createElement("details");
+    det.className="moreBox";
+    det.innerHTML = `<summary class="small">Exact PDF lines (for verification)</summary>
+      <ol class="steps">${stepsRaw.map(x=>`<li>${escapeHtml(x)}</li>`).join("")}</ol>`;
+    stepCard.appendChild(det);
+  }else{
+    const p = document.createElement("div");
+    p.className="small";
+    p.innerHTML = `Steps नहीं मिले। Menu code से search करें या PDF Library में देखें।`;
+    stepCard.appendChild(p);
+  }
+  container.appendChild(stepCard);
+
+  const srcCard = document.createElement("div");
+  srcCard.className="card";
+  srcCard.innerHTML = `<h2>Sources (PDF pages)</h2><div class="small">Open exact page or download the PDF.</div>`;
+  container.appendChild(srcCard);
+
+  const topShow = sources.slice(0,4);
+  const moreShow = sources.slice(4);
+
+  const makeSrc = (s)=>{
+    const fileEnc = encodeURIComponent(s.pdf);
+    const openUrl = `viewer.html?file=pdfs/${fileEnc}&page=${encodeURIComponent(s.page)}`;
+    const dlUrl   = `pdfs/${fileEnc}`;
+    const box = document.createElement("div");
+    box.className="src";
+    box.innerHTML = `
+      <div class="srcTop">
+        <div><b>${escapeHtml(s.pdf)}</b> <span class="small">• Page ${escapeHtml(s.page)}</span></div>
+        <div class="btns">
+          <a class="btn" href="${openUrl}" target="_blank" rel="noopener">Open page</a>
+          <a class="btn" href="${dlUrl}" download>Download</a>
+        </div>
+      </div>
+      <div class="snippet">${escapeHtml(snippet(s.text, query))}</div>
+    `;
+    return box;
+  };
+
+  if(!sources.length){
+    const none = document.createElement("div");
+    none.className="small";
+    none.textContent="No PDF pages matched. Try different keywords or open PDF Library.";
+    srcCard.appendChild(none);
+  }else{
+    topShow.forEach(s=>srcCard.appendChild(makeSrc(s)));
+    if(moreShow.length){
+      const det = document.createElement("details");
+      det.className="moreBox";
+      det.innerHTML = `<summary class="small">More results (${moreShow.length})</summary>`;
+      moreShow.forEach(s=>det.appendChild(makeSrc(s)));
+      srcCard.appendChild(det);
+    }
+  }
+
+  if(keepChooser){
+    const chooser = $("#answer").firstElementChild;
+    $("#answer").innerHTML = "";
+    if(chooser) $("#answer").appendChild(chooser);
+    $("#answer").appendChild(container);
+  }else{
+    $("#answer").innerHTML = "";
+    $("#answer").appendChild(container);
+  }
+}
+
 function renderAnswer(query) {
   const ans = $("#answer");
   if (!ans) return;
@@ -719,124 +952,18 @@ function renderAnswer(query) {
   }
   // ---------- END HARD ENQUIRY ROUTES ----------
 
-  // ---------- PDF-based answer for all other queries ----------
-  const sources = uniqueTopSources(qRaw, 10);
-  const menus = extractMenus(sources, tokens);
-  const steps = buildStepsFromSources(qRaw, sources, 8);
-  const sop = steps.length >= 3 ? null : detectSopFallback(qRaw);
-
-  ans.innerHTML = "";
-
-  // Header
-  const head = document.createElement("div");
-  head.className = "card";
-  head.innerHTML = `
-    <h2>SOP / Steps <span class="small">• ${steps.length ? "PDF-based" : sop ? "template + PDFs" : "no PDF match"}</span></h2>
-    <div class="small">Query: <b>${escapeHtml(qRaw)}</b></div>
-  `;
-  ans.appendChild(head);
-
-  // Menus FIRST
-  const menuCard = document.createElement("div");
-  menuCard.className = "card";
-  menuCard.innerHTML = `<h2>Suggested Finacle Menu / Command</h2><div class="small">Top matched from relevant PDF pages.</div>`;
-  if (menus.length) {
-    const wrap = document.createElement("div");
-    wrap.className = "menuWrap";
-    wrap.innerHTML = menus
-      .slice(0, 10)
-      .map((m, idx) => `<span class="menu">${idx === 0 ? "⭐ " : ""}${escapeHtml(m)}</span>`)
-      .join("");
-    menuCard.appendChild(wrap);
-
-    const tip = document.createElement("div");
-    tip.className = "small";
-    tip.innerHTML = `Tip: ⭐ वाला menu पहले try करें। नीचे Sources में exact PDF page open करें।`;
-    menuCard.appendChild(tip);
-  } else {
-    const p = document.createElement("div");
-    p.className = "small";
-    p.textContent = "No strong menu code detected for this query. Check Sources / PDF Library.";
-    menuCard.appendChild(p);
-  }
-  ans.appendChild(menuCard);
-
-  // Steps
-  const stepCard = document.createElement("div");
-  stepCard.className = "card";
-  stepCard.innerHTML = `<h2>PDF-based Steps</h2><div class="small">Clean SOP lines picked from matching PDF pages.</div>`;
-  if (steps.length) {
-    const ol = document.createElement("ol");
-    ol.className = "steps";
-    ol.innerHTML = steps.map((x) => `<li>${escapeHtml(x)}</li>`).join("");
-    stepCard.appendChild(ol);
-  } else {
-    const p = document.createElement("div");
-    p.className = "small";
-    p.innerHTML = `No matching step text found in indexed PDFs (some PDFs may be scanned/images). Try keywords like menu code or use <b>PDF Library</b>.`;
-    stepCard.appendChild(p);
-  }
-  ans.appendChild(stepCard);
-
-  // Template fallback (rare)
-  if (sop) {
-    const t = document.createElement("div");
-    t.className = "card";
-    t.innerHTML = `
-      <h2>Quick Template (Verify with PDFs) <span class="small">• fallback</span></h2>
-      <div class="small"><b>${escapeHtml(sop.title_hi || "")}</b> <span class="small">/ ${escapeHtml(sop.title_en || "")}</span></div>
-      <div class="hr"></div>
-      <ol class="steps">${(sop.steps_hi || []).map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ol>
-      <div class="small">Tip: नीचे दिए PDF references से exact SOP verify करें।</div>
-    `;
-    ans.appendChild(t);
-  }
-
-  // Sources
-  const srcCard = document.createElement("div");
-  srcCard.className = "card";
-  srcCard.innerHTML = `<h2>Sources (PDF pages)</h2><div class="small">Open exact page or download the PDF.</div>`;
-  ans.appendChild(srcCard);
-
-  if (!sources.length) {
-    const none = document.createElement("div");
-    none.className = "small";
-    none.textContent = "No PDF pages matched. Try different keywords (menu code) or open PDF Library.";
-    srcCard.appendChild(none);
+  // ---------- Branch Mode intent: chooser when ambiguous ----------
+  const intent = detectIntent(qRaw);
+  if (intent === "unknown") {
+    const guess = (hints.utr) ? "inquiry" : "process";
+    renderIntentChooser(qRaw, guess);
+    renderAnswerWithIntent(qRaw, guess, true);
     return;
   }
 
-  const topShow = sources.slice(0, 4);
-  const moreShow = sources.slice(4);
+  renderAnswerWithIntent(qRaw, intent, false);
+  return;
 
-  function srcBox(s) {
-    const fileEnc = encodeURIComponent(s.pdf);
-    const openUrl = `viewer.html?file=pdfs/${fileEnc}&page=${encodeURIComponent(s.page)}`;
-    const dlUrl = `pdfs/${fileEnc}`;
-    const box = document.createElement("div");
-    box.className = "src";
-    box.innerHTML = `
-      <div class="srcTop">
-        <div><b>${escapeHtml(s.pdf)}</b> <span class="small">• Page ${escapeHtml(s.page)}</span></div>
-        <div class="btns">
-          <a class="btn" href="${openUrl}" target="_blank" rel="noopener">Open page</a>
-          <a class="btn" href="${dlUrl}" download>Download</a>
-        </div>
-      </div>
-      <div class="snippet">${escapeHtml(snippet(s.text, qRaw))}</div>
-    `;
-    return box;
-  }
-
-  for (const s of topShow) srcCard.appendChild(srcBox(s));
-
-  if (moreShow.length) {
-    const details = document.createElement("details");
-    details.className = "moreBox";
-    details.innerHTML = `<summary class="small">More results (${moreShow.length})</summary>`;
-    for (const s of moreShow) details.appendChild(srcBox(s));
-    srcCard.appendChild(details);
-  }
 }
 
 /* =========================
