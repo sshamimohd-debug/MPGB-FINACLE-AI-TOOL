@@ -1,31 +1,65 @@
 <!doctype html>
-<html lang="hi">
+<html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>MPGB Finacle AI Tool</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div class="container">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">🏦</div>
+        <div>
+          <h1>MPGB FINACLE AI TOOL</h1>
+          <div class="subtitle">NEFT • RTGS • Account Open/Close • CIF • HACM • SOP • Commands • PDFs</div>
+        </div>
+      </div>
 
-<header>
-  <h1>🏦 MPGB FINACLE AI TOOL</h1>
-  <p>NEFT • Account Open / Close • CIF • HACM • SOP + Commands + PDFs</p>
-</header>
+      <nav class="tabs">
+        <button class="tab active" id="tabAssistant" data-tab="assistant" type="button">Assistant</button>
+        <button class="tab" id="tabLibrary" data-tab="library" type="button">PDF Library</button>
+      </nav>
+    </header>
 
-<main>
-  <div class="search-box">
-    <input id="query" placeholder="Type here: NEFT kaise kare, CIF ka SOP batao">
-    <button onclick="runQuery()">Search</button>
+    <section class="searchRow">
+      <input id="q" class="searchInput" placeholder="Type your query (Hindi/English) e.g., RTGS / खाता बंद / CIF" />
+      <button id="ask" class="searchBtn" type="button">Search</button>
+    </section>
+
+    <section id="assistant" class="tabPage" style="display:block">
+      <div id="chips" class="chips"></div>
+      <div id="answer"></div>
+    </section>
+
+    <section id="library" class="tabPage" style="display:none">
+      <div class="card">
+        <div class="rowBetween">
+          <div>
+            <h2>PDF Library</h2>
+            <div class="small">Search PDFs, open in viewer, or download.</div>
+          </div>
+          <div>
+            <input id="pdfSearch" class="miniInput" placeholder="Search PDF name…" />
+            <div id="pdfCount" class="small"></div>
+          </div>
+        </div>
+        <div class="hr"></div>
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr><th>PDF</th><th>Pages</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="pdfRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </div>
 
-  <div id="output"></div>
-</main>
+  <div id="toast" class="toast"></div>
 
-<footer>
-  <small>MPGB Internal Reference Tool</small>
-</footer>
-
-<script src="app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
