@@ -132,3 +132,5 @@ th{color:#dbe7ff;font-weight:650}
   pointer-events:none;
   font-size:13px;
 }
+.moreBox summary{cursor:pointer;margin-top:10px}
+.moreBox[open] summary{margin-bottom:10px}
