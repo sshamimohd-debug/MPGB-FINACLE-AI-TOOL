@@ -1,40 +1,55 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<title>PDF Viewer</title>
-<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.js"></script>
-<style>
-body{margin:0;font-family:Arial}
-header{padding:8px;background:#eee}
-canvas{display:block;margin:auto}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PDF Viewer</title>
+  <style>
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#0b1220;color:#e7f0ff}
+    .bar{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:12px 14px;background:#0f243f;border-bottom:1px solid rgba(255,255,255,.12)}
+    .btn{display:inline-block;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e7f0ff;text-decoration:none;font-size:13px}
+    .btn:hover{border-color:rgba(255,255,255,.28)}
+    .meta{font-size:13px;color:#b8c7e6}
+    iframe{width:100%;height:calc(100vh - 56px);border:0;background:#fff}
+  </style>
 </head>
 <body>
+  <div class="bar">
+    <div>
+      <div id="title" style="font-weight:700">PDF Viewer</div>
+      <div class="meta" id="meta"></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn" id="download" href="#" download>Download</a>
+      <a class="btn" id="openNew" href="#" target="_blank" rel="noopener">Open in new tab</a>
+      <a class="btn" href="./">Back</a>
+    </div>
+  </div>
 
-<header>
-  <a href="javascript:history.back()">⬅ Back</a>
-</header>
+  <iframe id="frame" src=""></iframe>
 
-<canvas id="c"></canvas>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const file = params.get("file") || "";
+    const page = params.get("page") || "1";
 
-<script>
-pdfjsLib.GlobalWorkerOptions.workerSrc =
- "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.js";
+    const titleEl = document.getElementById("title");
+    const metaEl = document.getElementById("meta");
+    const frame = document.getElementById("frame");
+    const dl = document.getElementById("download");
+    const openNew = document.getElementById("openNew");
 
-const qs = new URLSearchParams(location.search);
-const file = qs.get("file");
-const pageNo = parseInt(qs.get("page") || "1");
-
-(async()=>{
-  const pdf = await pdfjsLib.getDocument(file).promise;
-  const page = await pdf.getPage(pageNo);
-  const vp = page.getViewport({scale:1.4});
-  const c = document.getElementById("c");
-  c.width = vp.width;
-  c.height = vp.height;
-  await page.render({canvasContext:c.getContext("2d"),viewport:vp}).promise;
-})();
-</script>
+    if(!file){
+      titleEl.textContent = "Missing file parameter";
+      metaEl.textContent = "Use viewer.html?file=pdfs/XYZ.pdf&page=1";
+    }else{
+      const src = file + "#page=" + encodeURIComponent(page);
+      titleEl.textContent = (file.split("/").pop() || "PDF") + " • Page " + page;
+      metaEl.textContent = file;
+      frame.src = src;
+      dl.href = file;
+      openNew.href = src;
+    }
+  </script>
 </body>
 </html>
